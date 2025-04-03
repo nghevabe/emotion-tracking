@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import time
+import datetime
 import tensorflow as tf
 
 import firebase_admin
@@ -13,7 +14,11 @@ model = tf.keras.models.load_model("emotion_mobilenetv2_finetuned.h5")
 emotion_labels = ["Angry", "Disgust", "Fear", "Happy", "Neutral", "Sad", "Surprise"]
 
 # Nhãn cảm xúc tiêu cực
-emotion_negative = ["Disgust", "Fear", "Sad"]
+emotion_negative = ["Disgust", "Fear", "Sad", "Angry"]
+
+# Nhãn cảm xúc tiêu cực
+emotion_positive = ["Happy"]
+
 json_path = r'C:\Users\Public\cred.json'
 
 cred = credentials.Certificate(json_path)
@@ -31,7 +36,19 @@ video_path = 0  # Để chạy webcam, đổi thành "video.mp4" nếu dùng fil
 is_negative = 0
 cap = cv2.VideoCapture(video_path)
 
+limit_time = 5
+
+
 negative_time_counter = 0
+positive_time_counter = 0
+
+negative_time_report = 0
+positive_time_report = 0
+
+lst_time_negative = []
+lst_time_positive = []
+start_time = ""
+end_time = ""
 
 
 def preprocess_frame(frame, x, y, w, h):
@@ -47,6 +64,44 @@ def preprocess_frame(frame, x, y, w, h):
     face = face / 255.0  # Chuẩn hóa pixel về [0,1]
     face = np.expand_dims(face, axis=0)  # Thêm batch dimension
     return face
+
+
+def report_negative():
+    # Thống kê Nagative
+    if negative_time_counter > limit_time:
+        time_stamp = str(time.time()).split(".")[0]
+        date_value = datetime.datetime.now().strftime("%Y-%m-%d")
+        end_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report = start_time + " - " + end_time
+
+        print("Time Stamp: " + time_stamp)
+        print("Time Negative: " + report)
+
+        address = 'fsb_emotion_detech/alert_system/report/negative/' + date_value
+        node = db.reference(address)
+        node.update({
+            time_stamp: report  # gửi tín hiệu lên server Firebase
+        })
+    # Thống kê Nagative
+
+
+def report_positive():
+    # Thống kê Positive
+    if positive_time_counter > limit_time:
+        time_stamp = str(time.time()).split(".")[0]
+        date_value = datetime.datetime.now().strftime("%Y-%m-%d")
+        end_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report = start_time + " - " + end_time
+
+        print("Time Stamp: " + time_stamp)
+        print("Time Positive: " + report)
+
+        address = 'fsb_emotion_detech/alert_system/report/positive/' + date_value
+        node = db.reference(address)
+        node.update({
+            time_stamp: report  # gửi tín hiệu lên server Firebase
+        })
+    # Thống kê Positive
 
 
 while cap.isOpened():
@@ -74,23 +129,43 @@ while cap.isOpened():
         if predicted_emotion in emotion_negative:
             time.sleep(1)
             negative_time_counter += 1
+            print("negative_time_counter Counter: " + str(negative_time_counter))
 
             # Nếu phát hiện ra Cảm Xúc Tiêu Cực kéo dài trong 5 giây
-            if negative_time_counter == 5:
+            if negative_time_counter == limit_time:
+                start_time = predicted_emotion + ": " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print("Negative Emotion")
                 node = db.reference('fsb_emotion_detech/alert_system')
                 node.update({
                     'negative': '1' # gửi tín hiệu lên server Firebase
                 })
-                time.sleep(5)
+            # Nếu phát hiện ra Cảm Xúc Tiêu Cực kéo dài trong 5 giây
+
+            positive_time_counter = 0
+
+        # Xử lý nhận diện Cảm Xúc Tích Cực
+        if predicted_emotion in emotion_positive:
+            time.sleep(1)
+            positive_time_counter += 1
+
+            # Nếu phát hiện ra Cảm Xúc Tích Cực kéo dài trong 5 giây
+            if positive_time_counter == limit_time:
+                start_time = predicted_emotion + ": " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                print("Positive Emotion")
                 node = db.reference('fsb_emotion_detech/alert_system')
                 node.update({
-                    'negative': '0' # reset lại tín hiệu
+                    'positive': '1' # gửi tín hiệu lên server Firebase
                 })
-                negative_time_counter = 0 # reset lại giá trị về 0 để chạy luồng mới
-        else:
-            print("Stable Emotion")
+             # Nếu phát hiện ra Cảm Xúc Tích Cực kéo dài trong 5 giây
+
             negative_time_counter = 0
+
+        if predicted_emotion == "Neutral":
+            report_negative()
+            report_positive()
+            positive_time_counter = 0
+            negative_time_counter = 0
+
 
     # Hiển thị video với nhận diện cảm xúc
     cv2.imshow("Emotion Recognition", frame)
