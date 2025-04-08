@@ -1,9 +1,8 @@
-import tensorflow as tf
 import os
 
 from keras import Model
 from keras.src.applications.mobilenet_v2 import MobileNetV2
-from keras.src.layers import Flatten, Dense, Dropout, GlobalAveragePooling2D
+from keras.src.layers import Dense, Dropout, GlobalAveragePooling2D
 from keras.src.legacy.preprocessing.image import ImageDataGenerator
 
 # Định nghĩa đường dẫn dataset
@@ -40,16 +39,20 @@ val_data = train_datagen.flow_from_directory(
 # Load MobileNetV2 (pre-trained trên ImageNet)
 base_model = MobileNetV2(weights="imagenet", include_top=False, input_shape=(224, 224, 3))
 
+# Đóng băng toàn bộ mô hình gốc trước khi fine-tune
+base_model.trainable = False
+
 # Mở khóa 30 layer cuối để fine-tune
+base_model.trainable = True
 for layer in base_model.layers[-30:]:
     layer.trainable = True
 
 # Thêm các lớp đầu ra mới
 x = GlobalAveragePooling2D()(base_model.output)
-x = Dense(256, activation="relu")(x)  # ✅ Phải gán lại x sau mỗi lớp
-x = Dropout(0.5)(x)  # Thêm dropout để tránh overfitting
-x = Dense(128, activation="relu")(x)
-output = Dense(7, activation="softmax")(x)  # Kết nối đầu ra
+x = Dense(256, activation="relu")(x)  # Học thêm đặc trưng
+x = Dropout(0.5)(x)  # Thêm dropout để tránh overfitting (Kỹ thuật loại bỏ bớt các nơ-ron)
+x = Dense(128, activation="relu")(x) # Học thêm đặc trưng (Sau khi dropout lại tiếp tục học thêm đặc trưng)
+output = Dense(7, activation="softmax")(x)  # Kết nối đầu ra (FER2013 có 7 nhãn cảm xúc)
 
 # Xây dựng model hoàn chỉnh
 model = Model(inputs=base_model.input, outputs=output)
@@ -59,7 +62,7 @@ model.compile(optimizer=Adam(learning_rate=0.0001),
               loss="categorical_crossentropy",
               metrics=["accuracy"])
 
-# Train model
+# Huấn luyện giai đoạn fine-tune
 history = model.fit(
     train_data,
     validation_data=val_data,
