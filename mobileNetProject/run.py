@@ -10,7 +10,7 @@ from firebase_admin import db, credentials
 # Load mô hình đã huấn luyện
 model = tf.keras.models.load_model("emotion_mobilenetv2_finetuned.h5")
 
-# Nhãn cảm xúc
+# Nhãn tất cả cảm xúc
 emotion_labels = ["Angry", "Disgust", "Fear", "Happy", "Neutral", "Sad", "Surprise"]
 
 # Nhãn cảm xúc tiêu cực
@@ -21,12 +21,11 @@ emotion_positive = ["Happy"]
 
 json_path = r'C:\Users\Public\cred.json'
 
+# Setup địa chỉ Firebase
 cred = credentials.Certificate(json_path)
 obj = firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://iot-server-edaa9-default-rtdb.firebaseio.com'
 })
-
-# db.reference('fsb_emotion_detech/emotion_negative', app=obj).listen(listener)
 
 # Load bộ phát hiện khuôn mặt của OpenCV
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
@@ -36,17 +35,16 @@ video_path = 0  # Để chạy webcam, đổi thành "video.mp4" nếu dùng fil
 is_negative = 0
 cap = cv2.VideoCapture(video_path)
 
-limit_time = 5
+limit_time = 5 # Để limit time là 5 giây (ghi nhận cảm xúc diễn ra trong vòng 5 giây thì sẽ có action)
 
+negative_time_counter = 0 # bộ đếm khoảng thời gian để kích hoạt cảm xúc tiêu cực
+positive_time_counter = 0 # bộ đếm khoảng thời gian để kích hoạt cảm xúc tích cực
 
-negative_time_counter = 0
-positive_time_counter = 0
+negative_time_report = 0 # bộ đếm khoảng thời gian diễn ra cảm xúc tiêu cực
+positive_time_report = 0 # bộ đếm khoảng thời gian diễn ra cảm xúc tích cực
 
-negative_time_report = 0
-positive_time_report = 0
-
-lst_time_negative = []
-lst_time_positive = []
+lst_time_negative = [] # list thời điểm diễn ra cảm xúc tiêu cực
+lst_time_positive = [] # list thời điểm diễn ra cảm xúc tích cực
 start_time = ""
 end_time = ""
 
@@ -77,6 +75,7 @@ def report_negative():
         print("Time Stamp: " + time_stamp)
         print("Time Negative: " + report)
 
+        # Tạo ra 1 bản ghi mới để ghi lại khoảng thời gian diễn ra cảm xúc
         address = 'fsb_emotion_detech/alert_system/report/negative/' + date_value
         node = db.reference(address)
         node.update({
@@ -96,6 +95,7 @@ def report_positive():
         print("Time Stamp: " + time_stamp)
         print("Time Positive: " + report)
 
+        # Tạo ra 1 bản ghi mới để ghi lại khoảng thời gian diễn ra cảm xúc
         address = 'fsb_emotion_detech/alert_system/report/positive/' + date_value
         node = db.reference(address)
         node.update({
@@ -160,11 +160,11 @@ while cap.isOpened():
 
             negative_time_counter = 0
 
-        if predicted_emotion == "Neutral":
-            report_negative()
-            report_positive()
-            positive_time_counter = 0
-            negative_time_counter = 0
+        if predicted_emotion == "Neutral": # Trạng thái bình thường (Kết thúc trạng thái Tiêu Cực/Tích Cực)
+            report_negative() # Tạo report gửi lên Firebase
+            report_positive() # Tạo report gửi lên Firebase
+            positive_time_counter = 0 # Reset Time Counter về 0
+            negative_time_counter = 0 # Reset Time Counter về 0
 
 
     # Hiển thị video với nhận diện cảm xúc
