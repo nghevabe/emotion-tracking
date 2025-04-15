@@ -1,71 +1,119 @@
 import cv2
 import numpy as np
 import tensorflow as tf
+import time
+from typing import Tuple, List
 
-# Load mô hình đã huấn luyện
-model = tf.keras.models.load_model("emotion_mobilenetv2_finetuned.h5")
+class EmotionDetector:
+    def __init__(self, model_path: str = "emotion_mobilenetv2_finetuned.h5"):
+        """Khởi tạo detector với model và các tham số cần thiết"""
+        try:
+            self.model = tf.keras.models.load_model(model_path)
+            self.emotion_labels = ["Angry", "Disgust", "Fear", "Happy", "Neutral", "Sad", "Surprise"]
+            self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            self.fps = 0
+            self.frame_count = 0
+            self.start_time = time.time()
+        except Exception as e:
+            print(f"Lỗi khi khởi tạo EmotionDetector: {str(e)}")
+            raise
 
-# Nhãn cảm xúc
-emotion_labels = ["Angry", "Disgust", "Fear", "Happy", "Neutral", "Sad", "Surprise"]
+    def preprocess_frame(self, frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
+        """Tiền xử lý ảnh khuôn mặt"""
+        try:
+            face = frame[y:y + h, x:x + w]
+            face = cv2.resize(face, (224, 224))
+            face = face / 255.0
+            return np.expand_dims(face, axis=0)
+        except Exception as e:
+            print(f"Lỗi khi tiền xử lý frame: {str(e)}")
+            return None
 
-# Load bộ phát hiện khuôn mặt của OpenCV
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    def detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
+        """Phát hiện khuôn mặt trong frame"""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return self.face_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,  # Giảm scaleFactor để tăng độ chính xác
+            minNeighbors=5,
+            minSize=(50, 50)
+        )
 
-# Mở webcam hoặc video (sử dụng 0 cho camera mặc định, hoặc đặt đường dẫn video)
-video_path = 0  # Để chạy webcam, đổi thành "video.mp4" nếu dùng file video
-cap = cv2.VideoCapture(video_path)
+    def predict_emotion(self, face_input: np.ndarray) -> Tuple[str, np.ndarray]:
+        """Dự đoán cảm xúc từ ảnh khuôn mặt"""
+        if face_input is None:
+            return None, None
+        predictions = self.model.predict(face_input, verbose=0)[0]
+        predicted_emotion = self.emotion_labels[np.argmax(predictions)]
+        return predicted_emotion, predictions
 
+    def draw_results(self, frame: np.ndarray, faces: List[Tuple[int, int, int, int]], 
+                    predictions: List[Tuple[str, np.ndarray]]) -> np.ndarray:
+        """Vẽ kết quả lên frame"""
+        for (x, y, w, h), (emotion, probs) in zip(faces, predictions):
+            if emotion and probs is not None:
+                # Vẽ khung khuôn mặt
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(frame, emotion, (x, y - 10), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-def preprocess_frame(frame, x, y, w, h):
-    """
-    Tiền xử lý ảnh khuôn mặt trước khi đưa vào model
-    - Cắt khuôn mặt từ ảnh màu gốc
-    - Resize về 224x224
-    - Chuẩn hóa pixel về [0,1]
-    - Thêm batch dimension
-    """
-    face = frame[y:y + h, x:x + w]  # Cắt vùng khuôn mặt từ ảnh gốc
-    face = cv2.resize(face, (224, 224))  # Resize về 224x224
-    face = face / 255.0  # Chuẩn hóa pixel về [0,1]
-    face = np.expand_dims(face, axis=0)  # Thêm batch dimension
-    return face
+                # Hiển thị xác suất
+                for i, (label, prob) in enumerate(zip(self.emotion_labels, probs)):
+                    text = f"{label}: {prob:.2f}"
+                    cv2.putText(frame, text, (10, 30 + i * 30), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
+        # Hiển thị FPS
+        self.frame_count += 1
+        if time.time() - self.start_time >= 1.0:
+            self.fps = self.frame_count
+            self.frame_count = 0
+            self.start_time = time.time()
+        
+        cv2.putText(frame, f"FPS: {self.fps}", (10, frame.shape[0] - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        
+        return frame
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break  # Thoát nếu hết video hoặc lỗi
+def main():
+    try:
+        detector = EmotionDetector()
+        cap = cv2.VideoCapture(0)
+        
+        if not cap.isOpened():
+            print("Không thể mở camera")
+            return
 
-    # Chuyển ảnh sang grayscale để nhận diện khuôn mặt (nhưng vẫn giữ ảnh màu)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.3, minNeighbors=5, minSize=(50, 50))
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                print("Không thể đọc frame từ camera")
+                break
 
-    for (x, y, w, h) in faces:
-        # Hiển thị ảnh khuôn mặt trước khi dự đoán
-        cv2.imshow("Face Detected", frame[y:y + h, x:x + w])
+            # Phát hiện khuôn mặt
+            faces = detector.detect_faces(frame)
+            
+            # Xử lý từng khuôn mặt
+            predictions = []
+            for (x, y, w, h) in faces:
+                face_input = detector.preprocess_frame(frame, x, y, w, h)
+                emotion, probs = detector.predict_emotion(face_input)
+                predictions.append((emotion, probs))
 
-        # Tiền xử lý ảnh
-        face_input = preprocess_frame(frame, x, y, w, h)
+            # Vẽ kết quả
+            frame = detector.draw_results(frame, faces, predictions)
+            
+            # Hiển thị
+            cv2.imshow("Emotion Recognition", frame)
+            
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
 
-        # Dự đoán cảm xúc
-        predictions = model.predict(face_input)[0]  # Lấy vector xác suất
-        predicted_emotion = emotion_labels[np.argmax(predictions)]  # Lấy nhãn có xác suất cao nhất
+    except Exception as e:
+        print(f"Lỗi trong quá trình chạy: {str(e)}")
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
 
-        # Vẽ khung khuôn mặt
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        cv2.putText(frame, predicted_emotion, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-
-        # Hiển thị xác suất từng cảm xúc
-        for i, (emotion, prob) in enumerate(zip(emotion_labels, predictions)):
-            text = f"{emotion}: {prob:.2f}"
-            cv2.putText(frame, text, (10, 30 + i * 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-    # Hiển thị video với nhận diện cảm xúc
-    cv2.imshow("Emotion Recognition", frame)
-
-    # Nhấn 'q' để thoát
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+if __name__ == "__main__":
+    main()
