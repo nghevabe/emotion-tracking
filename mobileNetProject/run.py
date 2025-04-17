@@ -31,11 +31,13 @@ obj = firebase_admin.initialize_app(cred, {
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 
 # Mở webcam hoặc video (sử dụng 0 cho camera mặc định, hoặc đặt đường dẫn video)
-video_path = 0  # Để chạy webcam, đổi thành "video.mp4" nếu dùng file video
+
+video_path = "sad7.mp4"  # Để chạy webcam, đổi thành "video.mp4" nếu dùng file video
 is_negative = 0
 cap = cv2.VideoCapture(video_path)
 
 limit_time = 5 # Để limit time là 5 giây (ghi nhận cảm xúc diễn ra trong vòng 5 giây thì sẽ có action)
+limit_time_negative = 10
 
 negative_time_counter = 0 # bộ đếm khoảng thời gian để kích hoạt cảm xúc tiêu cực
 positive_time_counter = 0 # bộ đếm khoảng thời gian để kích hoạt cảm xúc tích cực
@@ -66,7 +68,7 @@ def preprocess_frame(frame, x, y, w, h):
 
 def report_negative():
     # Thống kê Nagative
-    if negative_time_counter > limit_time:
+    if negative_time_counter > limit_time_negative:
         time_stamp = str(time.time()).split(".")[0]
         date_value = datetime.datetime.now().strftime("%Y-%m-%d")
         end_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -132,7 +134,7 @@ while cap.isOpened():
             print("negative_time_counter Counter: " + str(negative_time_counter))
 
             # Nếu phát hiện ra Cảm Xúc Tiêu Cực kéo dài trong 5 giây
-            if negative_time_counter == limit_time:
+            if negative_time_counter == limit_time_negative:
                 start_time = predicted_emotion + ": " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 print("Negative Emotion")
                 node = db.reference('fsb_emotion_detech/alert_system')
@@ -166,12 +168,25 @@ while cap.isOpened():
             positive_time_counter = 0 # Reset Time Counter về 0
             negative_time_counter = 0 # Reset Time Counter về 0
 
+            node = db.reference('fsb_emotion_detech/alert_system')
+            node.update({
+                'negative': '0' , # gửi tín hiệu lên server Firebase
+                'positive': '0'  # gửi tín hiệu lên server Firebase
+            })
+
 
     # Hiển thị video với nhận diện cảm xúc
     cv2.imshow("Emotion Recognition", frame)
 
     # Nhấn 'q' để thoát
     if cv2.waitKey(1) & 0xFF == ord("q"):
+        node = db.reference('fsb_emotion_detech/alert_system')
+        node.update({
+            'negative': '0',  # gửi tín hiệu lên server Firebase
+            'positive': '0'  # gửi tín hiệu lên server Firebase
+        })
+        report_negative()  # Tạo report gửi lên Firebase
+        report_positive()  # Tạo report gửi lên Firebase
         break
 
 cap.release()
